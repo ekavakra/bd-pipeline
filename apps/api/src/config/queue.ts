@@ -41,6 +41,8 @@ export const slaCheckQueue = new Queue('sla-check', defaultOpts);
 export const transcriptionQueue = new Queue('transcription', defaultOpts);
 export const emailSendQueue = new Queue('email-send', defaultOpts);
 export const notificationQueue = new Queue('notification', defaultOpts);
+export const agentTaskQueue = new Queue('agent-task', defaultOpts);
+export const agentScheduleQueue = new Queue('agent-schedule', defaultOpts);
 
 /**
  * Register repeatable jobs (cron-style tasks)
@@ -81,4 +83,6 @@ export const allQueues = [
   transcriptionQueue,
   emailSendQueue,
   notificationQueue,
+  agentTaskQueue,
+  agentScheduleQueue,
 ];

@@ -1,7 +1,7 @@
 # Plan 1: Phase 1 - Completion & Foundation
 
 ## Overview
-Phase 1 is approximately 80% complete. This plan focuses on completing remaining work, testing, and building the AI Agent foundation.
+Phase 1 core features are implemented. Agent infrastructure is now built. Remaining work: tests and Prisma migration for agent tables.
 
 ## Current Status
 
@@ -15,13 +15,39 @@ Phase 1 is approximately 80% complete. This plan focuses on completing remaining
 | Follow-up Sequences | ✅ Complete | BullMQ integration |
 | Call Transcription | ✅ Complete | FastAPI sidecar integration |
 | Proposal Generation | ✅ Complete | AI-generated proposals |
-| Deal Close | ✅ Complete | Atomic transaction |
+| Deal Close | ✅ Complete | Atomic transaction — deals module created with service/controller/routes |
+| Client Management | ✅ Complete | 14+ field name bugs fixed in clients.service.ts to match Prisma schema |
+| Event Bus | ✅ Complete | Redis pub/sub + persistence, ioredis integration |
+| Agent Log Service | ✅ Complete | Prisma-backed logging for all agent actions |
+| Agent Memory Service | ✅ Complete | In-process context store + conversation history |
+| Agent Planner Service | ✅ Complete | LLM decision-making via ChatOllama |
+| Agent Queues | ✅ Complete | agent-task + agent-schedule queues added to BullMQ |
+| Agent Schedule Config | ✅ Complete | Cron definitions for 7 agents |
+| Base Agent Class | ✅ Complete | Abstract foundation with logging, events, tasks |
+| Lead Discovery Agent | ✅ Complete | Discover, score-new, auto-qualify tasks |
+| Lead Scoring Agent | ✅ Complete | Event-driven + batch scoring |
+| Follow-up Agent | ✅ Complete | Auto-sequences + stale lead detection |
+| Notification Agent | ✅ Complete | Event-driven: Telegram (urgent) + in-app (info) |
+| Agent API Routes | ✅ Complete | GET/PATCH config, status, activity, trigger, events |
+| Agent Workers | ✅ Complete | Registered in worker.ts with scheduler |
+| Module Tests | 🔲 Not Started | Only auth, health, leads have tests |
+| DB Migration (agent tables) | ⚠️ Pending | Prisma client generated; migration blocked by Neon DB cold start |
 
 ---
 
 ## Section 1.1: Testing & Bug Fixes
 
-### Task 1.1.1: Leads Module Tests
+### Task 1.1.0: Client Service Bug Fixes ✅ DONE
+**Fixed 14+ field name mismatches** in `apps/api/src/modules/clients/clients.service.ts`:
+- `contactName` → `primaryContactName`, `contactEmail` → `primaryContactEmail`
+- `accountManagerId` → `assignedManagerId`, `pipeline` → `onboardingPipeline`
+- `currentStage: 'DISCOVERY'` → `'DEAL_CLOSED'`, `completed` → `isCompleted`
+- `slaBreached` → `healthStatus` filter, `stageEnteredAt` → `lastActivityAt`
+- `enteredAt/enteredById` → `transitionedAt/transitionedById/fromStage/toStage`
+- `healthScores/recordedAt` → `customerHealth/computedAt`
+- Also fixed `clients.controller.ts` and simplified `dealCloseSchema`
+
+### Task 1.1.1: Leads Module Tests 🔲 TODO
 **Files to create:**
 - `apps/api/src/modules/leads/__tests__/leads.service.test.ts`
 - `apps/api/src/modules/leads/__tests__/leads.controller.test.ts`
@@ -49,132 +75,99 @@ Phase 1 is approximately 80% complete. This plan focuses on completing remaining
 
 ---
 
-## Section 1.3: AI Agent Core Infrastructure
+## Section 1.3: AI Agent Core Infrastructure ✅ COMPLETE
 
-### Task 1.3.1: Event Bus Service
+### Task 1.3.1: Event Bus Service ✅ DONE
 **File:** `apps/api/src/services/event-bus.service.ts`
 
-**What:** Create Redis pub/sub based event system
+**Implemented:** Redis pub/sub event system with 25+ event constants, publish/subscribe/getAllRecentEvents, 24h TTL persistence, ioredis-compatible API.
 
-**Pattern:**
-```typescript
-// Use existing Redis connection from apps/api/src/config/redis.ts
-import { redis } from '../config/redis.js';
-
-interface EventData {
-  type: string;
-  payload: Record<string, unknown>;
-  timestamp: Date;
-}
-
-// Export events as constants
-export const EVENTS = {
-  LEAD_DISCOVERED: 'lead:discovered',
-  LEAD_SCORED: 'lead:scored',
-  LEAD_QUALIFIED: 'lead:qualified',
-  DEAL_CLOSED: 'deal:closed',
-  STAGE_ADVANCED: 'onboarding:stage-advanced',
-  SLA_BREACH: 'onboarding:sla-breach',
-  NPS_SUBMITTED: 'success:nps-submitted',
-  CHURN_DETECTED: 'success:churn-detected',
-} as const;
-```
-
-### Task 1.3.2: Agent Log Service
+### Task 1.3.2: Agent Log Service ✅ DONE
 **File:** `apps/api/src/services/agent-log.service.ts`
 
-**What:** Log all autonomous agent actions
+**Implemented:** Persistent DB logging via AgentLog model (Prisma), with getLogs/getStats/getLastAction. Also created agent-memory.service.ts and agent-planner.service.ts.
 
-**Pattern:**
-```typescript
-interface AgentLogEntry {
-  id: string;
-  agentType: 'lead' | 'onboarding' | 'success' | 'notify';
-  action: string;
-  targetType: string;
-  targetId: string;
-  status: 'success' | 'failed' | 'pending_approval';
-  reasoning: string;
-  details: Record<string, unknown>;
-  createdAt: Date;
-}
-```
-
-### Task 1.3.3: Add Agent Queues
+### Task 1.3.3: Add Agent Queues ✅ DONE
 **File:** `apps/api/src/config/queue.ts`
 
-**Add:**
-```typescript
-export const agentTaskQueue = new Queue('agent-task', defaultOpts);
-export const agentScheduleQueue = new Queue('agent-schedule', defaultOpts);
-```
+**Added:** `agentTaskQueue` and `agentScheduleQueue` to BullMQ. Also created `apps/api/src/config/agent-schedule.ts` with cron definitions for 7 agents.
 
-### Task 1.3.4: Lead Discovery Agent
+### Task 1.3.4: Lead Discovery Agent ✅ DONE
 **File:** `apps/api/src/agents/lead-discovery.agent.ts`
 
-**What:** Autonomous lead discovery using existing services
+**Implemented:** Tasks: discover (queues search job), score-new (finds un-scored leads), auto-qualify (auto-approves high-score leads >70). Extends BaseAgent.
 
-**Dependencies:** 
-- `apps/api/src/services/web-search.service.ts` (exists)
-- `apps/api/src/services/scraper.service.ts` (exists)
-- `apps/api/src/modules/leads/leads.service.ts` (exists)
-
-**Pattern:**
-```typescript
-class LeadDiscoveryAgent {
-  async runDiscoveryTask(filters: SearchFilters): Promise<Lead[]> {
-    // 1. Expand queries using Ollama
-    // 2. Search via SearXNG
-    // 3. Scrape company data
-    // 4. Extract and create leads
-    // 5. Publish LEAD_DISCOVERED event
-  }
-}
-```
-
-### Task 1.3.5: Lead Scoring Agent
+### Task 1.3.5: Lead Scoring Agent ✅ DONE
 **File:** `apps/api/src/agents/lead-scoring.agent.ts`
 
-**Dependencies:**
-- `apps/api/src/jobs/processors.ts` (exists - `processAiScoring`)
+**Implemented:** Subscribes to LEAD_DISCOVERED → auto-queues scoring. Tasks: score-lead, score-batch.
 
-### Task 1.3.6: Follow-up Agent
+### Task 1.3.6: Follow-up Agent ✅ DONE
 **File:** `apps/api/src/agents/followup.agent.ts`
 
-**Dependencies:**
-- `apps/api/src/modules/outreach/outreach.service.ts` (exists)
+**Implemented:** Subscribes to PITCH_SENT → auto-creates 3-step email follow-up. Tasks: create-sequence, check-stale.
+
+### Task 1.3.7: Notification Agent ✅ DONE (additional)
+**File:** `apps/api/src/agents/notification.agent.ts`
+
+**Implemented:** Event-driven — subscribes to SLA_BREACH, CHURN_DETECTED, NPS_DETRACTOR (urgent→Telegram), LEAD_QUALIFIED, STAGE_ADVANCED, UPSELL_DETECTED (info→in-app).
+
+### Task 1.3.8: Agent API Routes ✅ DONE (additional)
+**Files:** `apps/api/src/modules/agent/agent.{routes,controller,service}.ts`
+
+**Implemented:** GET /agent/status, GET /agent/activity, GET/PATCH /agent/config/:agentName, POST /agent/trigger/:agentName, GET /agent/events. All admin-only.
 
 ---
 
 ## File Summary
 
-### New Files to Create
+### New Files Created ✅
 
 ```
 apps/api/src/
 ├── agents/
-│   ├── lead-discovery.agent.ts
-│   ├── lead-scoring.agent.ts
-│   └── followup.agent.ts
+│   ├── base.agent.ts              ✅
+│   ├── lead-discovery.agent.ts    ✅
+│   ├── lead-scoring.agent.ts      ✅
+│   ├── followup.agent.ts          ✅
+│   └── notification.agent.ts      ✅
 ├── services/
-│   ├── event-bus.service.ts
-│   └── agent-log.service.ts
+│   ├── event-bus.service.ts       ✅
+│   ├── agent-log.service.ts       ✅
+│   ├── agent-memory.service.ts    ✅
+│   └── agent-planner.service.ts   ✅
+├── modules/
+│   ├── deals/
+│   │   ├── deals.service.ts       ✅
+│   │   ├── deals.controller.ts    ✅
+│   │   └── deals.routes.ts        ✅
+│   └── agent/
+│       ├── agent.service.ts       ✅
+│       ├── agent.controller.ts    ✅
+│       └── agent.routes.ts        ✅
+├── config/
+│   └── agent-schedule.ts          ✅
+├── jobs/
+│   ├── agent-processors.ts        ✅
+│   └── scheduler.ts               ✅
 ```
 
-### Files to Modify
+### Files Modified ✅
 
 ```
-apps/api/src/config/queue.ts
-apps/api/src/index.ts
-apps/api/src/jobs/processors.ts
+apps/api/src/config/queue.ts        — Added agent-task + agent-schedule queues
+apps/api/src/index.ts               — Registered deals + agent routes
+apps/api/src/worker.ts              — Added agent workers + scheduler
+apps/api/src/modules/clients/clients.service.ts   — Fixed 14+ field name bugs
+apps/api/src/modules/clients/clients.controller.ts — Fixed isCompleted + userId
+packages/shared/src/schemas/client.schema.ts       — Simplified dealCloseSchema
+packages/db/prisma/schema.prisma    — Added AgentLog + AgentConfig models
 ```
 
 ---
 
-## Priority Order
+## Remaining Work
 
-1. Task 1.3.1 - Event Bus Service
-2. Task 1.3.2 - Agent Log Service  
-3. Task 1.3.3 - Add Agent Queues
-4. Task 1.1.x - Testing (can parallel)
-5. Task 1.3.4-6 - Agents (depends on 1.3.1-3)
+1. **Tests** — Create tests for outreach, calls, proposals, clients, deals modules
+2. **DB Migration** — Run `prisma migrate dev` when Neon DB is accessible to create agent_logs/agent_configs tables
+3. **Swagger Verification** — Confirm all endpoints show in /api/docs

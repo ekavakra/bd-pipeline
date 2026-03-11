@@ -1,5 +1,28 @@
 # Plan 4: AI Agent Core System
 
+## Implementation Status
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| AgentLog + AgentConfig models | ✅ Done | Added to schema.prisma, Prisma client generated |
+| Event Bus Service | ✅ Done | Redis pub/sub, ioredis, 25+ event types |
+| Agent Log Service | ✅ Done | Prisma-backed, getLogs/getStats/getLastAction |
+| Agent Memory Service | ✅ Done | In-process context + conversation history |
+| Agent Planner Service | ✅ Done | ChatOllama decision-making |
+| Base Agent Class | ✅ Done | Abstract with logging, events, task execution |
+| Lead Discovery Agent | ✅ Done | Phase 1 |
+| Lead Scoring Agent | ✅ Done | Phase 1 |
+| Follow-up Agent | ✅ Done | Phase 1 |
+| Notification Agent | ✅ Done | Phase 1 |
+| Agent Processors + Scheduler | ✅ Done | BullMQ integration |
+| Agent API Routes | ✅ Done | Admin-only status/activity/config/trigger/events |
+| Worker Registration | ✅ Done | agent-task + agent-schedule workers |
+| Onboarding Agent | 🔲 Phase 2 | SLA monitoring, stage advancement |
+| Success Agent | 🔲 Phase 3 | NPS, churn, upsell, re-entry |
+| Monitor Agent | 🔲 Phase 2/3 | Health checks, SLA monitoring |
+| Frontend Agent Pages | 🔲 Not Started | Activity, config, status dashboard |
+| DB Migration | ⚠️ Pending | Neon DB cold start; run `prisma migrate dev` when accessible |
+
 ## Overview
 This plan details the implementation of the autonomous AI Agent system that powers all three phases. The agent system enables autonomous operation where the application runs itself in the background, making decisions and executing actions automatically.
 

@@ -9,7 +9,6 @@ import { prisma } from '../../config/db.js';
 import { logger } from '../../config/logger.js';
 import { NotFoundError, BadRequestError } from '../../utils/api-error.js';
 import { paginate, buildPaginationMeta } from '../../utils/pagination.js';
-import type { Prisma } from '@bd-pipeline/db';
 
 /** Ordered onboarding stages — must match Prisma OnboardingStage enum */
 const STAGE_ORDER = [
@@ -42,10 +41,10 @@ export const clientsService = {
     if (query.search) {
       where.OR = [
         { companyName: { contains: query.search, mode: 'insensitive' } },
-        { contactName: { contains: query.search, mode: 'insensitive' } },
+        { primaryContactName: { contains: query.search, mode: 'insensitive' } },
       ];
     }
-    if (query.assignedTo) where.accountManagerId = query.assignedTo;
+    if (query.assignedTo) where.assignedManagerId = query.assignedTo;
 
     const [clients, total] = await Promise.all([
       prisma.client.findMany({
@@ -53,8 +52,8 @@ export const clientsService = {
         ...paginate(query.page, query.limit),
         orderBy: { [query.sortBy]: query.sortOrder },
         include: {
-          accountManager: { select: { id: true, name: true, email: true } },
-          pipeline: { select: { id: true, currentStage: true, slaBreached: true } },
+          assignedManager: { select: { id: true, name: true, email: true } },
+          onboardingPipeline: { select: { id: true, currentStage: true, healthStatus: true } },
         },
       }),
       prisma.client.count({ where }),
@@ -63,27 +62,54 @@ export const clientsService = {
     return { clients, meta: buildPaginationMeta(total, query.page, query.limit) };
   },
 
-  /** Create a new client from a closed deal */
-  async create(data: Prisma.ClientCreateInput & { accountManagerId: string }) {
+  /** Create a new client (manual — bypasses deal flow) */
+  async create(data: {
+    leadId: string;
+    companyName: string;
+    primaryContactName: string;
+    primaryContactEmail: string;
+    primaryContactPhone?: string;
+    contractValue?: number;
+    contractStart?: Date;
+    contractEnd?: Date;
+    assignedManagerId: string;
+  }) {
     const client = await prisma.$transaction(async (tx) => {
       const newClient = await tx.client.create({
         data: {
+          leadId: data.leadId,
           companyName: data.companyName,
-          contactName: data.contactName,
-          contactEmail: data.contactEmail,
-          contactPhone: data.contactPhone,
-          dealValue: data.dealValue,
-          accountManagerId: data.accountManagerId,
-        } as never,
+          primaryContactName: data.primaryContactName,
+          primaryContactEmail: data.primaryContactEmail,
+          primaryContactPhone: data.primaryContactPhone,
+          contractValue: data.contractValue,
+          contractStart: data.contractStart,
+          contractEnd: data.contractEnd,
+          assignedManagerId: data.assignedManagerId,
+        },
       });
 
-      // Create the onboarding pipeline
+      // Create the onboarding pipeline starting at DEAL_CLOSED
       await tx.onboardingPipeline.create({
         data: {
           clientId: newClient.id,
-          currentStage: 'DISCOVERY',
+          currentStage: 'DEAL_CLOSED',
         },
       });
+
+      // Create initial stage log
+      const pipeline = await tx.onboardingPipeline.findUnique({ where: { clientId: newClient.id } });
+      if (pipeline) {
+        await tx.onboardingStageLog.create({
+          data: {
+            pipelineId: pipeline.id,
+            fromStage: 'DEAL_CLOSED',
+            toStage: 'DEAL_CLOSED',
+            transitionedById: data.assignedManagerId,
+            notes: 'Client created — onboarding pipeline initialised',
+          },
+        });
+      }
 
       return newClient;
     });
@@ -97,18 +123,18 @@ export const clientsService = {
     const client = await prisma.client.findUnique({
       where: { id },
       include: {
-        accountManager: { select: { id: true, name: true, email: true } },
-        pipeline: {
+        assignedManager: { select: { id: true, name: true, email: true } },
+        onboardingPipeline: {
           include: {
-            stageLogs: { orderBy: { enteredAt: 'desc' } },
+            stageLogs: { orderBy: { transitionedAt: 'desc' } },
             checklistItems: { orderBy: { createdAt: 'asc' } },
           },
         },
-        requirements: { orderBy: { priority: 'asc' } },
+        requirements: { orderBy: { createdAt: 'asc' } },
         documents: { orderBy: { createdAt: 'desc' } },
         meetings: { orderBy: { scheduledAt: 'desc' }, take: 10 },
-        npsResponses: { orderBy: { createdAt: 'desc' }, take: 5 },
-        healthScores: { orderBy: { recordedAt: 'desc' }, take: 1 },
+        npsResponses: { orderBy: { collectedAt: 'desc' }, take: 5 },
+        customerHealth: true,
       },
     });
     if (!client) throw new NotFoundError('Client');
@@ -127,7 +153,7 @@ export const clientsService = {
     const pipeline = await prisma.onboardingPipeline.findUnique({
       where: { clientId },
       include: {
-        stageLogs: { orderBy: { enteredAt: 'desc' } },
+        stageLogs: { orderBy: { transitionedAt: 'desc' } },
         checklistItems: { orderBy: { createdAt: 'asc' } },
       },
     });
@@ -148,12 +174,12 @@ export const clientsService = {
       throw new BadRequestError('Cannot advance past the final stage');
     }
 
-    // Check all checklist items are completed for current stage
+    // Check all mandatory checklist items are completed for current stage
     const pendingItems = await prisma.checklistItem.count({
-      where: { pipelineId: pipeline.id, stage: pipeline.currentStage, completed: false },
+      where: { pipelineId: pipeline.id, stage: pipeline.currentStage, isMandatory: true, isCompleted: false },
     });
     if (pendingItems > 0) {
-      throw new BadRequestError(`${pendingItems} checklist item(s) still pending for this stage`);
+      throw new BadRequestError(`${pendingItems} mandatory checklist item(s) still pending for this stage`);
     }
 
     const nextStage = STAGE_ORDER[currentIdx + 1]!;
@@ -161,14 +187,14 @@ export const clientsService = {
     await prisma.$transaction([
       prisma.onboardingPipeline.update({
         where: { clientId },
-        data: { currentStage: nextStage, stageEnteredAt: new Date() },
+        data: { currentStage: nextStage, lastActivityAt: new Date() },
       }),
       prisma.onboardingStageLog.create({
         data: {
           pipelineId: pipeline.id,
-          stage: nextStage,
-          enteredAt: new Date(),
-          enteredById: userId,
+          fromStage: pipeline.currentStage,
+          toStage: nextStage,
+          transitionedById: userId,
           notes,
         },
       }),
@@ -190,14 +216,14 @@ export const clientsService = {
     await prisma.$transaction([
       prisma.onboardingPipeline.update({
         where: { clientId },
-        data: { currentStage: stage, stageEnteredAt: new Date() },
+        data: { currentStage: stage, lastActivityAt: new Date() },
       }),
       prisma.onboardingStageLog.create({
         data: {
           pipelineId: pipeline.id,
-          stage,
-          enteredAt: new Date(),
-          enteredById: userId,
+          fromStage: pipeline.currentStage,
+          toStage: stage,
+          transitionedById: userId,
           notes: notes ?? 'Admin override',
         },
       }),
@@ -219,16 +245,16 @@ export const clientsService = {
   },
 
   /** Toggle a checklist item's completion status */
-  async updateChecklistItem(itemId: string, userId: string, completed: boolean) {
+  async updateChecklistItem(itemId: string, userId: string, isCompleted: boolean) {
     const item = await prisma.checklistItem.findUnique({ where: { id: itemId } });
     if (!item) throw new NotFoundError('Checklist item');
 
     return prisma.checklistItem.update({
       where: { id: itemId },
       data: {
-        completed,
-        completedAt: completed ? new Date() : null,
-        completedById: completed ? userId : null,
+        isCompleted,
+        completedAt: isCompleted ? new Date() : null,
+        completedById: isCompleted ? userId : null,
       },
     });
   },
@@ -237,22 +263,26 @@ export const clientsService = {
   async getRequirements(clientId: string) {
     return prisma.requirement.findMany({
       where: { clientId },
-      orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+      orderBy: { createdAt: 'asc' },
     });
   },
 
   /** Add a new requirement to a client */
-  async addRequirement(clientId: string, data: { title: string; description?: string; priority: string }) {
-    const client = await prisma.client.findUnique({ where: { id: clientId } });
+  async addRequirement(clientId: string, userId: string, data: { title: string; body: string }) {
+    const client = await prisma.client.findUnique({
+      where: { id: clientId },
+      include: { onboardingPipeline: true },
+    });
     if (!client) throw new NotFoundError('Client');
+    if (!client.onboardingPipeline) throw new NotFoundError('Pipeline');
 
     return prisma.requirement.create({
       data: {
         clientId,
+        pipelineId: client.onboardingPipeline.id,
         title: data.title,
-        description: data.description,
-        priority: data.priority,
-        status: 'OPEN',
+        body: data.body,
+        gatheredById: userId,
       },
     });
   },
@@ -262,10 +292,9 @@ export const clientsService = {
     const client = await prisma.client.findUnique({ where: { id: clientId } });
     if (!client) throw new NotFoundError('Client');
 
-    const [latestHealth, npsAvg, meetingCount] = await Promise.all([
-      prisma.customerHealth.findFirst({
+    const [customerHealth, npsAvg, meetingCount] = await Promise.all([
+      prisma.customerHealth.findUnique({
         where: { clientId },
-        orderBy: { recordedAt: 'desc' },
       }),
       prisma.npsResponse.aggregate({
         where: { clientId },
@@ -275,21 +304,21 @@ export const clientsService = {
     ]);
 
     return {
-      latestHealth,
+      customerHealth,
       npsAverage: npsAvg._avg.score,
       meetingCount,
     };
   },
 
-  /** Get all clients with SLA breaches */
+  /** Get all clients with SLA breaches (OVERDUE or AT_RISK health) */
   async getSlaBreaches() {
     return prisma.onboardingPipeline.findMany({
-      where: { slaBreached: true },
+      where: { healthStatus: { in: ['OVERDUE', 'AT_RISK'] } },
       include: {
-        client: { select: { id: true, companyName: true, contactName: true } },
-        stageLogs: { orderBy: { enteredAt: 'desc' }, take: 1 },
+        client: { select: { id: true, companyName: true, primaryContactName: true } },
+        stageLogs: { orderBy: { transitionedAt: 'desc' }, take: 1 },
       },
-      orderBy: { stageEnteredAt: 'asc' },
+      orderBy: { lastActivityAt: 'asc' },
     });
   },
 };

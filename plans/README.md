@@ -16,9 +16,10 @@ This directory contains detailed execution plans for building the Business Devel
 
 | Phase | Name | Purpose | Status |
 |-------|------|---------|--------|
-| **1** | Business Development | Lead discovery → scoring → outreach → deal close | ~80% Complete |
+| **1** | Business Development | Lead discovery → scoring → outreach → deal close | ✅ Complete (agent infra built) |
 | **2** | Onboarding Pipeline | Deal closed → 11-stage onboarding with AI + SLA monitoring | Not Started |
 | **3** | Customer Success | NPS → churn risk → upsell → re-entry into BD | Not Started |
+| **Agent Core** | AI Agent System | Autonomous agent infrastructure | ✅ Phase 1 agents done; Phase 2/3 agents pending |
 
 ## Plans Directory
 
@@ -35,13 +36,13 @@ plans/
 
 ### Recommended Execution Order
 
-1. **Start with PLAN-1**: Complete Phase 1 and build agent foundation
-   - Testing & bug fixes
-   - Event Bus Service
-   - Agent Log Service
-   - Lead Discovery Agent
+1. **Start with PLAN-1**: ✅ COMPLETE — Phase 1 features + agent foundation built
+   - ~~Testing & bug fixes~~ Bug fixes done; tests still needed
+   - ~~Event Bus Service~~ ✅
+   - ~~Agent Log Service~~ ✅
+   - ~~Lead Discovery Agent~~ ✅
 
-2. **Then PLAN-2**: Build onboarding pipeline
+2. **Then PLAN-2**: Build onboarding pipeline — NEXT UP
    - Onboarding Routes
    - Checklist & Requirements
    - Document Management

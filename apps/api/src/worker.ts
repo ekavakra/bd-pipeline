@@ -23,6 +23,8 @@ import {
   processSlaCheck,
   processNotification,
 } from './jobs/processors.js';
+import { processAgentTask, processAgentSchedule } from './jobs/agent-processors.js';
+import { registerAgentSchedules } from './jobs/scheduler.js';
 
 const connection = redis;
 
@@ -91,6 +93,22 @@ const notificationWorker = new Worker(
   { connection, concurrency: 5 },
 );
 
+// ── Agent Task Worker ────────────────────────
+
+const agentTaskWorker = new Worker(
+  'agent-task',
+  async (job) => processAgentTask(job),
+  { connection, concurrency: 2 },
+);
+
+// ── Agent Schedule Worker ────────────────────
+
+const agentScheduleWorker = new Worker(
+  'agent-schedule',
+  async (job) => processAgentSchedule(job),
+  { connection, concurrency: 1 },
+);
+
 // ── Worker Error Handling ────────────────────
 
 const workers = [
@@ -101,6 +119,8 @@ const workers = [
   followUpWorker,
   slaCheckWorker,
   notificationWorker,
+  agentTaskWorker,
+  agentScheduleWorker,
 ];
 
 for (const worker of workers) {
@@ -120,6 +140,7 @@ for (const worker of workers) {
 
 async function start() {
   await registerRepeatableJobs();
+  await registerAgentSchedules();
   logger.info({ workerCount: workers.length }, 'BullMQ workers started');
 }
 

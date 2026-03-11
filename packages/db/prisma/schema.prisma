@@ -738,3 +738,41 @@ model IdempotencyKey {
   @@index([createdAt])
   @@map("idempotency_keys")
 }
+
+// ─────────────────────────────────────────────
+// AI Agent System Models
+// ─────────────────────────────────────────────
+
+/// Agent action logs for audit, debugging, and context recall
+model AgentLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  agentType   String   @map("agent_type")       // 'lead', 'onboarding', 'success', 'notify', 'monitor'
+  action      String                             // 'discover_leads', 'advance_stage', etc.
+  targetType  String?  @map("target_type")       // 'lead', 'client', 'meeting'
+  targetId    String?  @map("target_id") @db.Uuid
+  status      String                             // 'success', 'failed', 'pending_approval'
+  reasoning   String?  @db.Text                  // AI reasoning for the action
+  details     Json?                              // Additional context
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([agentType])
+  @@index([status])
+  @@index([createdAt])
+  @@map("agent_logs")
+}
+
+/// Agent configuration and settings — enable/disable agents, set schedules
+model AgentConfig {
+  id          String   @id @default(uuid()) @db.Uuid
+  agentName   String   @unique @map("agent_name")
+  enabled     Boolean  @default(true)
+  schedule    String?                            // Cron expression
+  config      Json?                              // Agent-specific settings
+  lastRunAt   DateTime? @map("last_run_at")
+  lastStatus  String?  @map("last_status")       // 'success', 'failed'
+  runCount    Int      @default(0) @map("run_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("agent_configs")
+}

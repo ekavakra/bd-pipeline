@@ -31,6 +31,8 @@ import { clientsRoutes } from './modules/clients/clients.routes.js';
 import { callsRoutes } from './modules/calls/calls.routes.js';
 import { proposalsRoutes } from './modules/proposals/proposals.routes.js';
 import { aiRoutes } from './modules/ai/ai.routes.js';
+import { dealsRoutes } from './modules/deals/deals.routes.js';
+import agentRoutes from './modules/agent/agent.routes.js';
 
 // Shutdown
 import { registerShutdownHandlers } from './utils/graceful-shutdown.js';
@@ -69,6 +71,8 @@ app.use(API_PREFIX, clientsRoutes);
 app.use(API_PREFIX, callsRoutes);
 app.use(API_PREFIX, proposalsRoutes);
 app.use(API_PREFIX, aiRoutes);
+app.use(API_PREFIX, dealsRoutes);
+app.use(`${API_PREFIX}/agent`, agentRoutes);
 
 // ── Error Handling ───────────────────────────
 

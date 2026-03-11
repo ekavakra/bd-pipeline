@@ -62,7 +62,7 @@ export const clientsController = {
   /** PATCH /clients/:id/checklist/:itemId */
   updateChecklistItem: asyncHandler(async (req: Request, res: Response) => {
     const item = await clientsService.updateChecklistItem(
-      req.params['itemId']!, req.user!.userId, req.body.completed,
+      req.params['itemId']!, req.user!.userId, req.body.isCompleted,
     );
     res.json({ success: true, data: item });
   }),
@@ -75,7 +75,7 @@ export const clientsController = {
 
   /** POST /clients/:id/requirements */
   addRequirement: asyncHandler(async (req: Request, res: Response) => {
-    const req_ = await clientsService.addRequirement(req.params['id']!, req.body);
+    const req_ = await clientsService.addRequirement(req.params['id']!, req.user!.userId, req.body);
     res.status(201).json({ success: true, data: req_ });
   }),
 
