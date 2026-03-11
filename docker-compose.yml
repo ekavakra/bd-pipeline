@@ -1,0 +1,231 @@
+# ============================================
+# BD Pipeline — Docker Compose (Development)
+#
+# Default:  docker compose up        → redis + backend + frontend
+# With AI:  docker compose --profile ai up   → + ollama + transcription
+# With worker: docker compose --profile worker up → + BullMQ worker
+# Full:     docker compose --profile ai --profile worker up
+# ============================================
+
+services:
+  # ─────────────────────────────────────────────
+  # Infrastructure (always starts)
+  # ─────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    container_name: bd-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - bd-network
+
+  # ─────────────────────────────────────────────
+  # AI Services (opt-in via --profile ai)
+  # ─────────────────────────────────────────────
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: bd-ollama
+    restart: unless-stopped
+    profiles: [ai]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          memory: 10G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bd-network
+
+  # One-shot container to pull required Ollama models on first run
+  ollama-setup:
+    image: curlimages/curl:latest
+    container_name: bd-ollama-setup
+    profiles: [ai]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Pulling gpt-oss:120b-cloud..."
+        curl -sf http://ollama:11434/api/pull -d '{"name":"gpt-oss:120b-cloud"}' || true
+        echo "Model pulled."
+    restart: "no"
+    networks:
+      - bd-network
+
+  transcription:
+    build:
+      context: ./services/transcription
+      dockerfile: Dockerfile
+    container_name: bd-transcription
+    restart: unless-stopped
+    profiles: [ai]
+    ports:
+      - "5001:5001"
+    volumes:
+      - recordings:/tmp/recordings
+      - whisper_models:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5001/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - bd-network
+
+  # ─────────────────────────────────────────────
+  # Search Engine (always starts)
+  # ─────────────────────────────────────────────
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: bd-searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - bd-network
+
+  # ─────────────────────────────────────────────
+  # Application (always starts)
+  # ─────────────────────────────────────────────
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    container_name: bd-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
+      - ./packages:/app/packages
+      - recordings:/tmp/recordings
+    depends_on:
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_healthy
+    env_file: .env
+    extra_hosts:
+      - "ollama-host:172.20.0.1"
+    environment:
+      # Use Neon DB from .env (DATABASE_URL is passed through)
+      REDIS_URL: redis://redis:6379
+      # SearXNG meta-search engine (free, no API keys)
+      SEARXNG_URL: http://searxng:8080
+      # Ollama runs on the host — reach via the bd-network gateway
+      OLLAMA_BASE_URL: http://ollama-host:11434
+      OLLAMA_MODEL: gpt-oss:120b-cloud
+      OLLAMA_PRIMARY_MODEL: gpt-oss:120b-cloud
+      TRANSCRIPTION_SERVICE_URL: http://transcription:5001
+    networks:
+      - bd-network
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    container_name: bd-worker
+    restart: unless-stopped
+    profiles: [worker]
+    command: ["sh", "-c", "pnpm --filter @bd-pipeline/db generate && node --import tsx apps/api/src/worker.ts"]
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
+      - ./packages:/app/packages
+      - recordings:/tmp/recordings
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file: .env
+    extra_hosts:
+      - "ollama-host:172.20.0.1"
+    environment:
+      REDIS_URL: redis://redis:6379
+      OLLAMA_BASE_URL: http://ollama-host:11434
+      OLLAMA_MODEL: gpt-oss:120b-cloud
+      OLLAMA_PRIMARY_MODEL: gpt-oss:120b-cloud
+      TRANSCRIPTION_SERVICE_URL: http://transcription:5001
+    networks:
+      - bd-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: development
+    container_name: bd-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web/src:/app/apps/web/src
+      - ./packages:/app/packages
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001/api/v1
+    networks:
+      - bd-network
+
+# ─────────────────────────────────────────────
+# Named Volumes
+# ─────────────────────────────────────────────
+volumes:
+  redis_data:
+    driver: local
+  ollama_models:
+    driver: local
+  whisper_models:
+    driver: local
+  recordings:
+    driver: local
+
+# ─────────────────────────────────────────────
+# Network
+# ─────────────────────────────────────────────
+networks:
+  bd-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1

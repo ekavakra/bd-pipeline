@@ -1,0 +1,43 @@
+# ============================================
+# BD Pipeline — Docker Compose (Test)
+# Run: docker compose -f docker-compose.test.yml up -d
+# ============================================
+
+services:
+  test-db:
+    image: postgres:15-alpine
+    container_name: bd-test-postgres
+    environment:
+      POSTGRES_DB: bd_pipeline_test
+      POSTGRES_USER: bd_user
+      POSTGRES_PASSWORD: bd_password
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bd_user -d bd_pipeline_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks:
+      - bd-test-network
+
+  test-redis:
+    image: redis:7-alpine
+    container_name: bd-test-redis
+    ports:
+      - "6380:6379"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks:
+      - bd-test-network
+
+networks:
+  bd-test-network:
+    driver: bridge

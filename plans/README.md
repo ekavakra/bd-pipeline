@@ -1,0 +1,202 @@
+# BD Pipeline - Implementation Plans
+
+This directory contains detailed execution plans for building the Business Development Service - an autonomous AI-powered system for lead management, client onboarding, and customer success.
+
+## Project Overview
+
+**Vision:** Transform from a traditional application with manual triggers to an **autonomous AI Agent** that:
+- Runs continuously in the background
+- Auto-discovers and qualifies leads
+- Auto-manages onboarding pipeline
+- Auto-detects churn risks and upsell opportunities
+- Notifies team via Telegram when human input is needed
+- Makes intelligent decisions using Ollama (local LLM)
+
+## Phase Overview
+
+| Phase | Name | Purpose | Status |
+|-------|------|---------|--------|
+| **1** | Business Development | Lead discovery → scoring → outreach → deal close | ~80% Complete |
+| **2** | Onboarding Pipeline | Deal closed → 11-stage onboarding with AI + SLA monitoring | Not Started |
+| **3** | Customer Success | NPS → churn risk → upsell → re-entry into BD | Not Started |
+
+## Plans Directory
+
+```
+plans/
+├── README.md                           # This file
+├── PLAN-1-phase-1-completion.md       # Phase 1 completion + agent foundation
+├── PLAN-2-phase-2-onboarding.md       # Phase 2: Onboarding pipeline
+├── PLAN-3-phase-3-success.md          # Phase 3: Customer success
+└── PLAN-4-ai-agent-core.md            # AI Agent core system
+```
+
+## Quick Start
+
+### Recommended Execution Order
+
+1. **Start with PLAN-1**: Complete Phase 1 and build agent foundation
+   - Testing & bug fixes
+   - Event Bus Service
+   - Agent Log Service
+   - Lead Discovery Agent
+
+2. **Then PLAN-2**: Build onboarding pipeline
+   - Onboarding Routes
+   - Checklist & Requirements
+   - Document Management
+   - SLA Monitoring
+
+3. **Then PLAN-3**: Build customer success
+   - NPS Routes
+   - Health Score Algorithm
+   - Churn & Upsell Detection
+
+4. **Finally PLAN-4**: Complete agent system
+   - Agent Memory & Planner
+   - Event System
+   - Agent Scheduler
+   - Agent Dashboard
+
+### Dependencies Between Plans
+
+```
+PLAN-1 (Foundation)
+    │
+    ├──► PLAN-2 (Uses event bus, agent services)
+    │
+    ├──► PLAN-3 (Uses event bus, agent services)
+    │
+    └──► PLAN-4 (Completes the agent system)
+              │
+              └──► Integrates with all agents from Plans 1-3
+```
+
+## Architecture
+
+### Before (Traditional Application)
+```
+User → API → Database
+       ↓
+    Manual triggers
+```
+
+### After (Autonomous Agent)
+```
+┌─────────────────────────────────────────────────────┐
+│                   AI Agent Layer                     │
+│  (Makes decisions using Ollama)                     │
+├─────────────────────────────────────────────────────┤
+│  Event Bus ←── Triggers ──► Task Queue (BullMQ)    │
+│      ↓                                               │
+│  Action Engine ──► Services ──► Database           │
+│      ↓                                               │
+│  Notification Agent ──► Telegram / In-App           │
+└─────────────────────────────────────────────────────┘
+```
+
+## Key Components
+
+### Backend Services
+
+| Service | Purpose | Location |
+|---------|---------|----------|
+| Event Bus | Pub/Sub for system events | `apps/api/src/services/event-bus.service.ts` |
+| Agent Log | Audit trail for agent actions | `apps/api/src/services/agent-log.service.ts` |
+| Agent Memory | Context for AI decisions | `apps/api/src/services/agent-memory.service.ts` |
+| Agent Planner | Ollama decision making | `apps/api/src/services/agent-planner.service.ts` |
+
+### Specialized Agents
+
+| Agent | Purpose | Phase |
+|-------|---------|-------|
+| Lead Discovery Agent | Auto-find leads | 1 |
+| Lead Scoring Agent | Auto-score leads | 1 |
+| Follow-up Agent | Auto-follow sequences | 1 |
+| Onboarding Agent | Auto-advance stages | 2 |
+| SLA Agent | Monitor SLAs | 2 |
+| Document Agent | Auto-scan documents | 2 |
+| Meeting Agent | Schedule & remind | 2 |
+| NPS Agent | Collect feedback | 3 |
+| Health Agent | Monitor health | 3 |
+| Upsell Agent | Detect opportunities | 3 |
+
+## Communication Channels
+
+1. **Telegram Bot** - Primary notification channel
+   - Approval requests
+   - Action summaries
+   - Alert notifications
+
+2. **In-App Notifications** - Secondary
+   - Dashboard notification center
+
+3. **Email** - For client communications (approved by humans)
+
+## Database Models
+
+All models defined in `packages/db/prisma/schema.prisma`:
+
+- `User`, `RefreshToken` - Authentication
+- `Lead`, `LeadSearchJob` - Lead management
+- `OutreachPitch`, `FollowupSequence` - Outreach
+- `DiscoveryCall`, `Proposal` - Sales process
+- `Client`, `OnboardingPipeline` - Client management
+- `ChecklistItem`, `Requirement`, `Document` - Onboarding
+- `Meeting`, `MeetingNote` - Scheduling
+- `NpsResponse`, `CustomerHealth` - Success metrics
+- `Notification` - Alerts
+- `AgentLog`, `AgentConfig` - Agent system
+
+## Running the Project
+
+```bash
+# Basic services (Redis, Backend, Frontend, SearXNG)
+docker compose up
+
+# With AI (Ollama + Transcription)
+docker compose --profile ai up
+
+# With worker (BullMQ processor)
+docker compose --profile worker up
+
+# Full stack
+docker compose --profile ai --profile worker up
+```
+
+## Environment Variables
+
+Key variables in `.env`:
+
+```env
+# Database
+DATABASE_URL=postgresql://...
+
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# Ollama (AI)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=gpt-oss:120b-cloud
+
+# SearXNG (Search)
+SEARXNG_URL=http://localhost:8080
+```
+
+## API Documentation
+
+Once running, visit:
+- Swagger UI: `http://localhost:3001/api/docs`
+
+## Contributing
+
+Each plan follows this structure:
+1. **Overview** - What we're building
+2. **Prerequisites** - What needs to exist first
+3. **Tasks** - Specific file changes needed
+4. **Patterns** - Code conventions to follow
+5. **Priority** - Execution order
+
+---
+
+**Note:** These plans are designed for coding agents to execute independently. Each task specifies exact files to create/modify with patterns to follow.

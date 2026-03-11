@@ -1,0 +1,108 @@
+/**
+ * Client & Onboarding Schemas
+ */
+
+import { z } from 'zod';
+
+// ── Client Create ────────────────────────────
+
+export const createClientSchema = z.object({
+  companyName: z.string().min(1, 'Company name is required'),
+  primaryContactName: z.string().min(1, 'Contact name is required'),
+  primaryContactEmail: z.string().email('Valid email required'),
+  primaryContactPhone: z.string().optional(),
+  contractValue: z.number().positive().optional(),
+  contractStart: z.string().datetime().optional(),
+  contractEnd: z.string().datetime().optional(),
+  assignedManagerId: z.string().uuid(),
+});
+
+export const updateClientSchema = z.object({
+  companyName: z.string().min(1).optional(),
+  primaryContactName: z.string().min(1).optional(),
+  primaryContactEmail: z.string().email().optional(),
+  primaryContactPhone: z.string().optional(),
+  contractValue: z.number().positive().optional(),
+  contractStart: z.string().datetime().optional(),
+  contractEnd: z.string().datetime().optional(),
+  assignedManagerId: z.string().uuid().optional(),
+});
+
+// ── Deal Close ───────────────────────────────
+
+export const dealCloseSchema = z.object({
+  leadId: z.string().uuid(),
+  proposalId: z.string().uuid(),
+  dealValue: z.number().positive().optional(),
+  contractValue: z.number().positive().optional(),
+  contractStart: z.string().datetime().optional(),
+  contractEnd: z.string().datetime().optional(),
+  accountManagerId: z.string().uuid().optional(),
+  assignedManagerId: z.string().uuid().optional(),
+  notes: z.string().optional(),
+}).refine(
+  (data) => Boolean(data.dealValue ?? data.contractValue),
+  { message: 'Either dealValue or contractValue is required', path: ['dealValue'] },
+).refine(
+  (data) => Boolean(data.accountManagerId ?? data.assignedManagerId),
+  { message: 'Either accountManagerId or assignedManagerId is required', path: ['accountManagerId'] },
+);
+
+// ── Onboarding Stage ─────────────────────────
+
+export const advanceStageSchema = z.object({
+  notes: z.string().optional(),
+});
+
+export const setStageSchema = z.object({
+  stage: z.enum([
+    'DEAL_CLOSED',
+    'KICKOFF',
+    'REQUIREMENTS_GATHERING',
+    'DOCUMENTATION',
+    'TECHNICAL_SETUP',
+    'TESTING_UAT',
+    'GO_LIVE',
+    'TRAINING',
+    'COMPLETED',
+  ]),
+  notes: z.string().optional(),
+});
+
+// ── Checklist ────────────────────────────────
+
+export const updateChecklistItemSchema = z.object({
+  isCompleted: z.boolean(),
+});
+
+// ── Requirements ─────────────────────────────
+
+export const createRequirementSchema = z.object({
+  title: z.string().min(1, 'Title is required'),
+  body: z.string().min(1, 'Description is required'),
+});
+
+// ── Client List Query ────────────────────────
+
+export const clientListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.enum(['ONBOARDING', 'ACTIVE', 'AT_RISK', 'CHURNED']).optional(),
+  search: z.string().optional(),
+  sortBy: z.enum(['createdAt', 'companyName', 'status']).default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
+});
+
+// ── Client Response ──────────────────────────
+
+export const clientResponseSchema = z.object({
+  id: z.string().uuid(),
+  companyName: z.string(),
+  primaryContactName: z.string(),
+  primaryContactEmail: z.string(),
+  primaryContactPhone: z.string().nullable(),
+  contractValue: z.number().nullable(),
+  status: z.enum(['ONBOARDING', 'ACTIVE', 'AT_RISK', 'CHURNED']),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});

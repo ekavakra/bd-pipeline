@@ -1,0 +1,42 @@
+{
+  "name": "bd-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Client Onboarding & Business Development Service",
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "dev:api": "pnpm --filter @bd-pipeline/api dev",
+    "dev:web": "pnpm --filter @bd-pipeline/web dev",
+    "build": "pnpm --filter './packages/*' build && pnpm --filter './apps/*' build",
+    "build:api": "pnpm --filter @bd-pipeline/api build",
+    "build:web": "pnpm --filter @bd-pipeline/web build",
+    "test": "pnpm --recursive test",
+    "test:api": "pnpm --filter @bd-pipeline/api test",
+    "test:web": "pnpm --filter @bd-pipeline/web test",
+    "test:e2e": "pnpm --filter @bd-pipeline/e2e test",
+    "lint": "pnpm --recursive lint",
+    "lint:fix": "pnpm --recursive lint:fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
+    "typecheck": "pnpm --recursive typecheck",
+    "db:generate": "pnpm --filter @bd-pipeline/db generate",
+    "db:migrate": "pnpm --filter @bd-pipeline/db migrate",
+    "db:migrate:deploy": "pnpm --filter @bd-pipeline/db migrate:deploy",
+    "db:seed": "pnpm --filter @bd-pipeline/db seed",
+    "db:studio": "pnpm --filter @bd-pipeline/db studio",
+    "db:reset": "pnpm --filter @bd-pipeline/db reset",
+    "clean": "pnpm --recursive clean && rm -rf node_modules",
+    "prepare": "husky"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "devDependencies": {
+    "husky": "^9.1.7"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0"
+  }
+}

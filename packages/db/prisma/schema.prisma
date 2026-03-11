@@ -1,0 +1,740 @@
+// ============================================
+// BD Pipeline — Prisma Schema
+// Complete database schema for all 3 phases
+// ============================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  BD_MANAGER
+  ONBOARDING_MANAGER
+  PARTNER
+}
+
+enum LeadSource {
+  AI_SEARCH
+  MANUAL
+  REFERRAL
+  INBOUND
+}
+
+enum LeadStatus {
+  DISCOVERED
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ON_HOLD
+  CONTACTED
+  RESPONDED
+  IN_DISCOVERY
+  PROPOSAL_SENT
+  DEAL_CLOSED
+  LOST
+}
+
+enum SearchJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum OutreachChannel {
+  EMAIL
+  LINKEDIN
+  WHATSAPP
+}
+
+enum PitchStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  SENT
+  REJECTED
+}
+
+enum FollowupSequenceStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum FollowupStepStatus {
+  PENDING
+  SENT
+  SKIPPED
+}
+
+enum TranscriptStatus {
+  NONE
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum ProposalStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  SENT
+  ACCEPTED
+  REJECTED
+}
+
+enum ClientStatus {
+  ONBOARDING
+  ACTIVE
+  AT_RISK
+  CHURNED
+}
+
+enum OnboardingStage {
+  DEAL_CLOSED
+  KICKOFF
+  REQUIREMENTS_GATHERING
+  DOCUMENTATION
+  TECHNICAL_SETUP
+  TESTING_UAT
+  GO_LIVE
+  TRAINING
+  COMPLETED
+}
+
+enum HealthStatus {
+  ON_TRACK
+  AT_RISK
+  OVERDUE
+  STALLED
+}
+
+enum DocumentCategory {
+  CONTRACT
+  KYC
+  TECHNICAL_SPEC
+  NDA
+  OTHER
+}
+
+enum ScanStatus {
+  NOT_SCANNED
+  SCANNING
+  OK
+  ISSUES_FOUND
+}
+
+enum MeetingType {
+  DISCOVERY
+  KICKOFF
+  REQUIREMENTS
+  REVIEW
+  TRAINING
+  OTHER
+}
+
+enum MeetingStatus {
+  UPCOMING
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+enum AiEmailType {
+  FOLLOWUP
+  ONBOARDING_UPDATE
+  PROPOSAL
+  PITCH
+  CUSTOM
+}
+
+enum AiEmailStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  REJECTED
+}
+
+enum NotificationType {
+  SLA_ALERT
+  APPROVAL_REQUEST
+  STAGE_CHANGE
+  NEW_LEAD
+  UPSELL_SIGNAL
+  MEETING_REMINDER
+  EMAIL_APPROVAL
+}
+
+enum NotificationChannel {
+  IN_APP
+  TELEGRAM
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  LEAD_CREATED
+  LEAD_DELETED
+  LEAD_APPROVED
+  LEAD_REJECTED
+  SCORE_OVERRIDE
+  PITCH_APPROVED
+  PITCH_SENT
+  DEAL_CLOSED
+  STAGE_ADVANCED
+  ROLE_CHANGED
+  DOCUMENT_UPLOADED
+  DOCUMENT_DELETED
+  PROPOSAL_APPROVED
+  PROPOSAL_SENT
+  EMAIL_APPROVED
+  EMAIL_SENT
+}
+
+// ─────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────
+
+/// Team members / partners who use the system
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  email           String   @unique
+  passwordHash    String   @map("password_hash")
+  role            UserRole @default(BD_MANAGER)
+  telegramChatId  String?  @map("telegram_chat_id")
+  isActive        Boolean  @default(true) @map("is_active")
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  triggeredSearchJobs LeadSearchJob[]
+  reviewedLeads       Lead[]            @relation("ReviewedBy")
+  assignedLeads       Lead[]            @relation("AssignedTo")
+  reviewedPitches     OutreachPitch[]   @relation("PitchReviewedBy")
+  conductedCalls      DiscoveryCall[]
+  reviewedProposals   Proposal[]        @relation("ProposalReviewedBy")
+  managedClients      Client[]
+  stageTransitions    OnboardingStageLog[]
+  completedCheckItems ChecklistItem[]
+  gatheredRequirements Requirement[]
+  uploadedDocuments   Document[]
+  organizedMeetings   Meeting[]
+  writtenNotes        MeetingNote[]
+  reviewedEmails      AiEmail[]
+  collectedNps        NpsResponse[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  refreshTokens       RefreshToken[]
+
+  @@map("users")
+}
+
+/// Stores active refresh tokens for JWT auth
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  token     String   @unique
+  userId    String   @map("user_id") @db.Uuid
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// Discovered or manually added prospects
+model Lead {
+  id               String     @id @default(uuid()) @db.Uuid
+  companyName      String     @map("company_name")
+  contactName      String?    @map("contact_name")
+  contactEmail     String?    @map("contact_email")
+  contactLinkedin  String?    @map("contact_linkedin")
+  contactPhone     String?    @map("contact_phone")
+  website          String?
+  industry         String?
+  companySize      String?    @map("company_size")
+  location         String?
+  source           LeadSource @default(MANUAL)
+  rawData          Json?      @map("raw_data")
+
+  // Discovery provenance
+  discoverySource  String?   @map("discovery_source")  // 'apollo', 'web_search', 'ai_generated'
+  discoveryReason  String?   @map("discovery_reason")  // why this lead matched
+  searchJobId      String?   @map("search_job_id") @db.Uuid
+
+  // Scoring
+  aiScore              Float?  @map("ai_score")
+  scoreBreakdown       Json?   @map("score_breakdown")
+  humanScoreOverride   Float?  @map("human_score_override")
+
+  // Review
+  status       LeadStatus @default(DISCOVERED)
+  reviewedById String?    @map("reviewed_by") @db.Uuid
+  reviewedAt   DateTime?  @map("reviewed_at")
+  reviewNotes  String?    @map("review_notes")
+  assignedToId String?    @map("assigned_to") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  searchJob       LeadSearchJob?    @relation(fields: [searchJobId], references: [id])
+  reviewedBy      User?             @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  assignedTo      User?             @relation("AssignedTo", fields: [assignedToId], references: [id])
+  pitches         OutreachPitch[]
+  followupSequences FollowupSequence[]
+  discoveryCalls  DiscoveryCall[]
+  proposals       Proposal[]
+  client          Client?
+  meetings        Meeting[]
+  aiEmails        AiEmail[]
+
+  @@index([status])
+  @@index([aiScore])
+  @@index([assignedToId])
+  @@index([searchJobId])
+  @@map("leads")
+}
+
+/// Autonomous lead search job tracking
+model LeadSearchJob {
+  id            String          @id @default(uuid()) @db.Uuid
+  triggeredById String          @map("triggered_by") @db.Uuid
+  filters       Json
+  searchBrief   String?         @map("search_brief")  // human-readable summary
+  status        SearchJobStatus @default(QUEUED)
+  leadsFound    Int             @default(0) @map("leads_found")
+  errorMessage  String?         @map("error_message")
+  startedAt     DateTime?       @map("started_at")
+  completedAt   DateTime?       @map("completed_at")
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  triggeredBy User @relation(fields: [triggeredById], references: [id])
+  leads       Lead[]
+
+  @@index([status])
+  @@map("lead_search_jobs")
+}
+
+/// AI-generated pitch drafts for outreach
+model OutreachPitch {
+  id            String          @id @default(uuid()) @db.Uuid
+  leadId        String          @map("lead_id") @db.Uuid
+  channel       OutreachChannel
+  subject       String?
+  body          String          @db.Text
+  version       Int             @default(1)
+  status        PitchStatus     @default(DRAFT)
+  generatedByAi Boolean         @default(true) @map("generated_by_ai")
+  reviewedById  String?         @map("reviewed_by") @db.Uuid
+  approvedAt    DateTime?       @map("approved_at")
+  sentAt        DateTime?       @map("sent_at")
+  sendError     String?         @map("send_error")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  lead       Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("PitchReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([leadId])
+  @@index([status])
+  @@map("outreach_pitches")
+}
+
+/// Automated follow-up sequence per lead
+model FollowupSequence {
+  id          String                 @id @default(uuid()) @db.Uuid
+  leadId      String                 @map("lead_id") @db.Uuid
+  status      FollowupSequenceStatus @default(ACTIVE)
+  currentStep Int                    @default(0) @map("current_step")
+  totalSteps  Int                    @map("total_steps")
+  nextSendAt  DateTime?              @map("next_send_at")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+
+  lead  Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  steps FollowupStep[]
+
+  @@index([leadId])
+  @@index([status])
+  @@map("followup_sequences")
+}
+
+/// Individual steps within a follow-up sequence
+model FollowupStep {
+  id          String             @id @default(uuid()) @db.Uuid
+  sequenceId  String             @map("sequence_id") @db.Uuid
+  stepNumber  Int                @map("step_number")
+  channel     OutreachChannel
+  subject     String?
+  body        String             @db.Text
+  delayHours  Int                @map("delay_hours")
+  status      FollowupStepStatus @default(PENDING)
+  sentAt      DateTime?          @map("sent_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  sequence FollowupSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@index([sequenceId])
+  @@map("followup_steps")
+}
+
+/// Logged discovery calls with transcripts
+model DiscoveryCall {
+  id               String           @id @default(uuid()) @db.Uuid
+  leadId           String           @map("lead_id") @db.Uuid
+  scheduledAt      DateTime         @map("scheduled_at")
+  durationMinutes  Int?             @map("duration_minutes")
+  recordingUrl     String?          @map("recording_url")
+  transcript       String?          @db.Text
+  transcriptStatus TranscriptStatus @default(NONE) @map("transcript_status")
+  notes            String?          @db.Text
+  conductedById    String           @map("conducted_by") @db.Uuid
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  lead        Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  conductedBy User       @relation(fields: [conductedById], references: [id])
+  proposals   Proposal[]
+
+  @@index([leadId])
+  @@map("discovery_calls")
+}
+
+/// AI-generated or manual proposals
+model Proposal {
+  id           String         @id @default(uuid()) @db.Uuid
+  leadId       String         @map("lead_id") @db.Uuid
+  callId       String?        @map("call_id") @db.Uuid
+  title        String
+  body         String         @db.Text
+  fileUrl      String?        @map("file_url")
+  status       ProposalStatus @default(DRAFT)
+  version      Int            @default(1)
+  reviewedById String?        @map("reviewed_by") @db.Uuid
+  approvedAt   DateTime?      @map("approved_at")
+  sentAt       DateTime?      @map("sent_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  lead       Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  call       DiscoveryCall? @relation(fields: [callId], references: [id])
+  reviewedBy User?          @relation("ProposalReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([leadId])
+  @@index([status])
+  @@map("proposals")
+}
+
+/// Onboarded clients — created when a deal is closed
+model Client {
+  id                   String       @id @default(uuid()) @db.Uuid
+  leadId               String       @unique @map("lead_id") @db.Uuid
+  companyName          String       @map("company_name")
+  primaryContactName   String       @map("primary_contact_name")
+  primaryContactEmail  String       @map("primary_contact_email")
+  primaryContactPhone  String?      @map("primary_contact_phone")
+  contractValue        Decimal?     @map("contract_value") @db.Decimal(12, 2)
+  contractStart        DateTime?    @map("contract_start")
+  contractEnd          DateTime?    @map("contract_end")
+  assignedManagerId    String       @map("assigned_manager") @db.Uuid
+  status               ClientStatus @default(ONBOARDING)
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+
+  lead              Lead                @relation(fields: [leadId], references: [id])
+  assignedManager   User                @relation(fields: [assignedManagerId], references: [id])
+  onboardingPipeline OnboardingPipeline?
+  requirements      Requirement[]
+  documents         Document[]
+  meetings          Meeting[]
+  aiEmails          AiEmail[]
+  npsResponses      NpsResponse[]
+  customerHealth    CustomerHealth?
+
+  @@index([status])
+  @@index([assignedManagerId])
+  @@map("clients")
+}
+
+/// One pipeline per client — tracks current onboarding stage
+model OnboardingPipeline {
+  id             String          @id @default(uuid()) @db.Uuid
+  clientId       String          @unique @map("client_id") @db.Uuid
+  currentStage   OnboardingStage @default(DEAL_CLOSED) @map("current_stage")
+  healthStatus   HealthStatus    @default(ON_TRACK) @map("health_status")
+  startedAt      DateTime        @default(now()) @map("started_at")
+  completedAt    DateTime?       @map("completed_at")
+  lastActivityAt DateTime        @default(now()) @map("last_activity_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+
+  client         Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  stageLogs      OnboardingStageLog[]
+  checklistItems ChecklistItem[]
+  requirements   Requirement[]
+
+  @@index([currentStage])
+  @@index([healthStatus])
+  @@map("onboarding_pipelines")
+}
+
+/// Audit trail of every stage transition
+model OnboardingStageLog {
+  id              String          @id @default(uuid()) @db.Uuid
+  pipelineId      String          @map("pipeline_id") @db.Uuid
+  fromStage       OnboardingStage @map("from_stage")
+  toStage         OnboardingStage @map("to_stage")
+  transitionedById String         @map("transitioned_by") @db.Uuid
+  notes           String?
+  transitionedAt  DateTime        @default(now()) @map("transitioned_at")
+
+  pipeline      OnboardingPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  transitionedBy User              @relation(fields: [transitionedById], references: [id])
+
+  @@index([pipelineId])
+  @@map("onboarding_stage_logs")
+}
+
+/// Per-stage gate items — required checks before advancing
+model ChecklistItem {
+  id          String          @id @default(uuid()) @db.Uuid
+  pipelineId  String          @map("pipeline_id") @db.Uuid
+  stage       OnboardingStage
+  title       String
+  description String?
+  isMandatory Boolean         @default(true) @map("is_mandatory")
+  isCompleted Boolean         @default(false) @map("is_completed")
+  completedById String?       @map("completed_by") @db.Uuid
+  completedAt DateTime?       @map("completed_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  pipeline    OnboardingPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  completedBy User?              @relation(fields: [completedById], references: [id])
+
+  @@index([pipelineId, stage])
+  @@map("checklist_items")
+}
+
+/// SLA hours per onboarding stage — configurable
+model StageSlaConfig {
+  id        String          @id @default(uuid()) @db.Uuid
+  stage     OnboardingStage @unique
+  slaHours  Int             @map("sla_hours")
+  atRiskPct Float           @default(0.75) @map("at_risk_pct")
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@map("stage_sla_config")
+}
+
+/// Client requirements gathered during onboarding
+model Requirement {
+  id            String  @id @default(uuid()) @db.Uuid
+  clientId      String  @map("client_id") @db.Uuid
+  pipelineId    String  @map("pipeline_id") @db.Uuid
+  title         String
+  body          String  @db.Text
+  gatheredById  String  @map("gathered_by") @db.Uuid
+  aiSuggestions Json?   @map("ai_suggestions")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  client   Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  pipeline OnboardingPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  gatheredBy User              @relation(fields: [gatheredById], references: [id])
+
+  @@index([clientId])
+  @@map("requirements")
+}
+
+/// Uploaded client documents
+model Document {
+  id          String           @id @default(uuid()) @db.Uuid
+  clientId    String           @map("client_id") @db.Uuid
+  pipelineId  String?          @map("pipeline_id") @db.Uuid
+  name        String
+  fileUrl     String           @map("file_url")
+  fileType    String           @map("file_type")
+  fileSizeKb  Int              @map("file_size_kb")
+  category    DocumentCategory @default(OTHER)
+  expiryDate  DateTime?        @map("expiry_date")
+  scanStatus  ScanStatus       @default(NOT_SCANNED) @map("scan_status")
+  scanResult  Json?            @map("scan_result")
+  uploadedById String          @map("uploaded_by") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  client     Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  uploadedBy User   @relation(fields: [uploadedById], references: [id])
+
+  @@index([clientId])
+  @@index([category])
+  @@map("documents")
+}
+
+/// Scheduled meetings for all phases
+model Meeting {
+  id              String        @id @default(uuid()) @db.Uuid
+  clientId        String?       @map("client_id") @db.Uuid
+  leadId          String?       @map("lead_id") @db.Uuid
+  title           String
+  type            MeetingType   @default(OTHER)
+  scheduledAt     DateTime      @map("scheduled_at")
+  durationMinutes Int           @default(60) @map("duration_minutes")
+  meetLink        String?       @map("meet_link")
+  status          MeetingStatus @default(UPCOMING)
+  organizedById   String        @map("organized_by") @db.Uuid
+  calendarEventId String?       @map("calendar_event_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  client      Client?       @relation(fields: [clientId], references: [id])
+  lead        Lead?         @relation(fields: [leadId], references: [id])
+  organizedBy User          @relation(fields: [organizedById], references: [id])
+  notes       MeetingNote[]
+
+  @@index([clientId])
+  @@index([leadId])
+  @@index([scheduledAt])
+  @@map("meetings")
+}
+
+/// Meeting notes/updates
+model MeetingNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  meetingId String   @map("meeting_id") @db.Uuid
+  body      String   @db.Text
+  writtenById String @map("written_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  writtenBy User    @relation(fields: [writtenById], references: [id])
+
+  @@index([meetingId])
+  @@map("meeting_notes")
+}
+
+/// AI-drafted emails awaiting human approval
+model AiEmail {
+  id          String        @id @default(uuid()) @db.Uuid
+  clientId    String?       @map("client_id") @db.Uuid
+  leadId      String?       @map("lead_id") @db.Uuid
+  type        AiEmailType   @default(CUSTOM)
+  toEmail     String        @map("to_email")
+  subject     String
+  body        String        @db.Text
+  status      AiEmailStatus @default(DRAFT)
+  generatedAt DateTime      @default(now()) @map("generated_at")
+  reviewedById String?      @map("reviewed_by") @db.Uuid
+  approvedAt  DateTime?     @map("approved_at")
+  sentAt      DateTime?     @map("sent_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  client     Client? @relation(fields: [clientId], references: [id])
+  lead       Lead?   @relation(fields: [leadId], references: [id])
+  reviewedBy User?   @relation(fields: [reviewedById], references: [id])
+
+  @@index([clientId])
+  @@index([leadId])
+  @@index([status])
+  @@map("ai_emails")
+}
+
+/// Post-onboarding NPS responses
+model NpsResponse {
+  id          String   @id @default(uuid()) @db.Uuid
+  clientId    String   @map("client_id") @db.Uuid
+  score       Int      // 0-10
+  feedback    String?  @db.Text
+  collectedAt DateTime @default(now()) @map("collected_at")
+  collectedById String? @map("collected_by") @db.Uuid
+
+  client      Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  collectedBy User?  @relation(fields: [collectedById], references: [id])
+
+  @@index([clientId])
+  @@map("nps_responses")
+}
+
+/// In-app and Telegram notifications
+model Notification {
+  id            String              @id @default(uuid()) @db.Uuid
+  userId        String              @map("user_id") @db.Uuid
+  type          NotificationType
+  title         String
+  body          String
+  referenceType String?             @map("reference_type")
+  referenceId   String?             @map("reference_id") @db.Uuid
+  channel       NotificationChannel @default(IN_APP)
+  isRead        Boolean             @default(false) @map("is_read")
+  createdAt     DateTime            @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// Customer health — churn risk and upsell signals (Phase 3)
+model CustomerHealth {
+  id              String   @id @default(uuid()) @db.Uuid
+  clientId        String   @unique @map("client_id") @db.Uuid
+  churnRiskScore  Float    @map("churn_risk_score")
+  upsellScore     Float    @map("upsell_score")
+  lastActivityAt  DateTime? @map("last_activity_at")
+  usageSignals    Json?    @map("usage_signals")
+  upsellFlagged   Boolean  @default(false) @map("upsell_flagged")
+  upsellFlaggedAt DateTime? @map("upsell_flagged_at")
+  computedAt      DateTime @default(now()) @map("computed_at")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("customer_health")
+}
+
+/// Audit log for all sensitive actions across the system
+model AuditLog {
+  id            String      @id @default(uuid()) @db.Uuid
+  userId        String      @map("user_id") @db.Uuid
+  action        AuditAction
+  resourceType  String?     @map("resource_type")
+  resourceId    String?     @map("resource_id") @db.Uuid
+  metadata      Json?
+  ipAddress     String?     @map("ip_address")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+/// Idempotency keys for webhook deduplication
+model IdempotencyKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique
+  response  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Auto-expire after 24 hours (handled by cron/cleanup job)
+  @@index([createdAt])
+  @@map("idempotency_keys")
+}
